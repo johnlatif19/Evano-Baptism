@@ -811,30 +811,7 @@ app.post("/api/admin/settings/album-code", requireAdmin, requireCsrf, handle(asy
   res.json({ ok: true });
 }));
 
-const downloadSessions = new Map();
-
-app.post("/api/download-sessions", handle(async (req, res) => {
-  const items = Array.isArray(req.body?.items) ? req.body.items : [];
-  const clean = items
-    .filter((x) => x && typeof x.url === "string")
-    .map((x, i) => ({
-      url: x.url,
-      filename: x.filename || `photo_${i + 1}.jpg`,
-    }));
-  if (!clean.length) return res.status(400).json({ ok: false, message: "no items" });
-  const token = crypto.randomBytes(24).toString("hex");
-  downloadSessions.set(token, clean);
-  setTimeout(() => downloadSessions.delete(token), 1000 * 60 * 60 * 24);
-  res.json({ ok: true, token });
-}));
-
-app.get("/api/download-sessions/:token", handle(async (req, res) => {
-  const items = downloadSessions.get(req.params.token);
-  if (!items) return res.status(404).json({ ok: false, message: "not found" });
-  res.json({ ok: true, items });
-}));
-
-app.get("/download", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "download.html")));
+app.get("/login", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "login.html")));
 app.get("/dashboard", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "dashboard.html")));
 app.get("/gallery", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "gallery.html")));
 app.get("/search-face", (req, res) => res.sendFile(path.join(PUBLIC_DIR, "search-face.html")));
