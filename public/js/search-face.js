@@ -1,120 +1,465 @@
+"use strict";
+
 (function () {
-  'use strict';
+  const API = {
+    session: "/api/gallery/session",
+    access: "/api/gallery/access",
+    search: "/api/guest/search",
+    deleteSession: "/api/guest/search-session/delete"
+  };
+
+  const MAX_FILE_BYTES = 8 * 1024 * 1024;
+  const MIN_FILE_BYTES = 4 * 1024;
+  const MIN_DIM = 200;
+  const MAX_DIM = 6000;
+  const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
   const state = {
-    gateChecked: false,
+    authed: false,
     selfieFile: null,
-    selfieDescriptor: null,
-    searching: false,
+    selfiePreviewUrl: null,
+    sessionId: null,
+    abortController: null,
+    busy: false,
     results: [],
-    aborted: false
+    downloading: false
   };
 
-  const el = {
-    gate: document.getElementById('gate'),
-    formGate: document.getElementById('form-gate'),
-    galleryCode: document.getElementById('galleryCode'),
-    gateError: document.getElementById('gateError'),
-    btnGate: document.getElementById('btn-gate'),
-    search: document.getElementById('search'),
-    consentCheckbox: document.getElementById('consentCheckbox'),
-    selfieFieldset: document.getElementById('selfie-fieldset'),
-    btnCamera: document.getElementById('btn-camera'),
-    btnUpload: document.getElementById('btn-upload'),
-    cameraInput: document.getElementById('cameraInput'),
-    fileInput: document.getElementById('fileInput'),
-    preview: document.getElementById('preview'),
-    previewImg: document.getElementById('previewImg'),
-    previewInfo: document.getElementById('previewInfo'),
-    btnReplace: document.getElementById('btn-replace'),
-    btnClear: document.getElementById('btn-clear'),
-    selfieError: document.getElementById('selfieError'),
-    btnSearch: document.getElementById('btn-search'),
-    placeholder: document.getElementById('placeholder'),
-    stateSearching: document.getElementById('state-searching'),
-    progressBar: document.getElementById('progressBar'),
-    progressFill: document.getElementById('progressFill'),
-    searchingText: document.getElementById('searchingText'),
-    btnCancelSearch: document.getElementById('btn-cancel-search'),
-    stateResults: document.getElementById('state-results'),
-    resultsCount: document.getElementById('resultsCount'),
-    gallery: document.getElementById('gallery'),
-    btnDownloadAll: document.getElementById('btn-download-all'),
-    downloadStatus: document.getElementById('downloadStatus'),
-    stateEmpty: document.getElementById('state-empty'),
-    btnRetry: document.getElementById('btn-retry'),
-    stateError: document.getElementById('state-error'),
-    errorText: document.getElementById('errorText'),
-    btnErrorRetry: document.getElementById('btn-error-retry'),
-    sessionControls: document.getElementById('sessionControls'),
-    btnDeleteSession: document.getElementById('btn-delete-session'),
-    toast: document.getElementById('toast')
+  const el = (id) => document.getElementById(id);
+  const refs = {
+    gate: el("gate"),
+    formGate: el("form-gate"),
+    galleryCode: el("galleryCode"),
+    gateError: el("gateError"),
+    btnGate: el("btn-gate"),
+
+    search: el("search"),
+
+    consentCheckbox: el("consentCheckbox"),
+    selfieFieldset: el("selfie-fieldset"),
+    btnCamera: el("btn-camera"),
+    btnUpload: el("btn-upload"),
+    cameraInput: el("cameraInput"),
+    fileInput: el("fileInput"),
+
+    preview: el("preview"),
+    previewImg: el("previewImg"),
+    previewInfo: el("previewInfo"),
+    btnReplace: el("btn-replace"),
+    btnClear: el("btn-clear"),
+
+    selfieError: el("selfieError"),
+    btnSearch: el("btn-search"),
+
+    placeholder: el("placeholder"),
+    stateSearching: el("state-searching"),
+    stateResults: el("state-results"),
+    stateEmpty: el("state-empty"),
+    stateError: el("state-error"),
+    progressBar: el("progressBar"),
+    progressFill: el("progressFill"),
+    searchingText: el("searchingText"),
+    btnCancelSearch: el("btn-cancel-search"),
+    resultsCount: el("resultsCount"),
+    gallery: el("gallery"),
+    errorText: el("errorText"),
+    btnRetry: el("btn-retry"),
+    btnErrorRetry: el("btn-error-retry"),
+    sessionControls: el("sessionControls"),
+    btnDeleteSession: el("btn-delete-session"),
+
+    btnDownloadAll: el("btn-download-all"),
+    downloadStatus: el("downloadStatus"),
+
+    toast: el("toast")
   };
 
-  let toastTimer = null;
-  let isDownloading = false;
-
-  function redirectToGallery() {
-    window.location.replace('/gallery');
+  function getCookie(name) {
+    const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+    return match ? decodeURIComponent(match[1]) : null;
   }
 
-  function showToast(message, type) {
-    if (!el.toast) return;
-    el.toast.textContent = message;
-    el.toast.classList.remove('toast-error', 'toast-success');
-    if (type === 'error') el.toast.classList.add('toast-error');
-    if (type === 'success') el.toast.classList.add('toast-success');
-    el.toast.hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
+  function csrfHeaders(extra) {
+    const h = { "Content-Type": "application/json" };
+    const token = getCookie("gallery_csrf");
+    if (token) h["x-csrf-token"] = token;
+    return Object.assign(h, extra || {});
   }
 
-  function setButtonLoading(button, loading, idleText) {
+  function showToast(message, kind) {
+    if (!refs.toast) return;
+    refs.toast.textContent = message;
+    refs.toast.className = "toast" + (kind ? " toast-" + kind : "");
+    refs.toast.hidden = false;
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => { refs.toast.hidden = true; }, 4200);
+  }
+
+  function setBusy(button, busy, labelBusy) {
     if (!button) return;
-    const label = button.querySelector('.btn-label');
-    const spinner = button.querySelector('.spinner');
-    button.disabled = loading;
-    if (spinner) spinner.hidden = !loading;
-    if (label) {
-      if (!label.dataset.idleText) label.dataset.idleText = idleText || label.textContent;
-      label.textContent = loading ? 'جارٍ التحقق…' : label.dataset.idleText;
+    const label = button.querySelector(".btn-label");
+    const spinner = button.querySelector(".spinner");
+    if (busy) {
+      button.disabled = true;
+      if (label && labelBusy) {
+        if (!label.dataset.original) label.dataset.original = label.textContent;
+        label.textContent = labelBusy;
+      }
+      if (spinner) spinner.hidden = false;
+    } else {
+      button.disabled = false;
+      if (label && label.dataset.original) label.textContent = label.dataset.original;
+      if (spinner) spinner.hidden = true;
     }
   }
 
-  function hideAllStates() {
-    if (el.placeholder) el.placeholder.hidden = true;
-    if (el.stateSearching) el.stateSearching.hidden = true;
-    if (el.stateResults) el.stateResults.hidden = true;
-    if (el.stateEmpty) el.stateEmpty.hidden = true;
-    if (el.stateError) el.stateError.hidden = true;
+  async function safeJson(res) {
+    try { const d = await res.json(); return d && typeof d === "object" ? d : {}; }
+    catch { return {}; }
   }
 
-  function setProgress(percent) {
-    const clamped = Math.max(0, Math.min(100, percent));
-    if (el.progressFill) el.progressFill.style.width = `${clamped}%`;
-    if (el.progressBar) el.progressBar.setAttribute('aria-valuenow', String(Math.round(clamped)));
+  function formatBytes(bytes) {
+    if (!bytes) return "0 B";
+    const u = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + " " + u[i];
+  }
+
+  function readImageDimensions(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        URL.revokeObjectURL(url);
+        resolve({ width: w, height: h });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("invalid-image"));
+      };
+      img.src = url;
+    });
+  }
+
+  async function validateSelfie(file) {
+    if (!file) throw new Error("لم يتم اختيار صورة.");
+    if (!ALLOWED_TYPES.includes(file.type)) throw new Error("صيغة الصورة غير مدعومة.");
+    if (file.size < MIN_FILE_BYTES) throw new Error("الملف صغير جداً أو تالف.");
+    if (file.size > MAX_FILE_BYTES) throw new Error("حجم الصورة كبير جداً (الحد " + formatBytes(MAX_FILE_BYTES) + ").");
+
+    const buf = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+                   buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+    if (!isJpeg && !isPng && !isWebp) throw new Error("محتوى الملف لا يبدو صورة صالحة.");
+
+    const dims = await readImageDimensions(file);
+    if (dims.width < MIN_DIM || dims.height < MIN_DIM) throw new Error("أبعاد الصورة صغيرة جداً.");
+    if (dims.width > MAX_DIM || dims.height > MAX_DIM) throw new Error("أبعاد الصورة كبيرة جداً.");
+    return dims;
+  }
+
+  function resetSelfie() {
+    if (state.selfiePreviewUrl) {
+      URL.revokeObjectURL(state.selfiePreviewUrl);
+      state.selfiePreviewUrl = null;
+    }
+    state.selfieFile = null;
+    refs.preview.hidden = true;
+    refs.previewImg.removeAttribute("src");
+    refs.previewInfo.textContent = "";
+    refs.fileInput.value = "";
+    refs.cameraInput.value = "";
+    if (refs.selfieError) { refs.selfieError.textContent = ""; refs.selfieError.hidden = true; }
+    updateSearchButton();
+  }
+
+  function updateSearchButton() {
+    const consent = refs.consentCheckbox.checked;
+    const hasFile = !!state.selfieFile;
+    refs.selfieFieldset.disabled = !consent;
+    refs.btnSearch.disabled = !(consent && hasFile) || state.busy;
+  }
+
+  async function onSelfieSelected(file) {
+    refs.selfieError.hidden = true;
+    try {
+      const dims = await validateSelfie(file);
+      if (state.selfiePreviewUrl) URL.revokeObjectURL(state.selfiePreviewUrl);
+      state.selfieFile = file;
+      state.selfiePreviewUrl = URL.createObjectURL(file);
+      refs.previewImg.src = state.selfiePreviewUrl;
+      refs.previewInfo.textContent =
+        file.name + " · " + formatBytes(file.size) + " · " + dims.width + "×" + dims.height;
+      refs.preview.hidden = false;
+    } catch (err) {
+      resetSelfie();
+      refs.selfieError.textContent = err.message || "تعذّر قراءة الصورة.";
+      refs.selfieError.hidden = false;
+    }
+    updateSearchButton();
+  }
+
+  function showGate() {
+    state.authed = false;
+    refs.gate.hidden = false;
+    refs.search.hidden = true;
+    refs.galleryCode.value = "";
+    refs.galleryCode.focus();
+  }
+
+  function showSearch() {
+    state.authed = true;
+    refs.gate.hidden = true;
+    refs.search.hidden = false;
+  }
+
+  function redirectToGallery() {
+    window.location.replace("/gallery");
+  }
+
+  async function checkSession() {
+    try {
+      const res = await fetch(API.session, { credentials: "include", cache: "no-store" });
+      const data = await safeJson(res);
+      if (data && data.ok && data.authed) {
+        showSearch();
+      } else {
+        redirectToGallery();
+      }
+    } catch {
+      redirectToGallery();
+    }
+  }
+
+  async function onGateSubmit(e) {
+    e.preventDefault();
+    refs.gateError.hidden = true;
+    const code = (refs.galleryCode.value || "").trim();
+    if (code.length < 4) {
+      refs.gateError.textContent = "الرمز قصير جداً.";
+      refs.gateError.hidden = false;
+      return;
+    }
+    setBusy(refs.btnGate, true, "جارٍ التحقق…");
+    try {
+      const res = await fetch(API.access, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      const data = await safeJson(res);
+      if (!res.ok || !data.ok) {
+        refs.gateError.textContent =
+          (data && data.message) ||
+          (res.status === 429 ? "محاولات كثيرة. حاول لاحقاً." : "الرمز غير صحيح.");
+        refs.gateError.hidden = false;
+        return;
+      }
+      showSearch();
+    } catch {
+      refs.gateError.textContent = "تعذّر الاتصال بالخدمة. تحقق من الشبكة.";
+      refs.gateError.hidden = false;
+    } finally {
+      setBusy(refs.btnGate, false);
+    }
+  }
+
+  function setResultState(name) {
+    refs.placeholder.hidden = name !== "placeholder";
+    refs.stateSearching.hidden = name !== "searching";
+    refs.stateResults.hidden = name !== "results";
+    refs.stateEmpty.hidden = name !== "empty";
+    refs.stateError.hidden = name !== "error";
+    refs.sessionControls.hidden = name !== "results";
+  }
+
+  function setProgress(v) {
+    const val = Math.max(0, Math.min(100, Math.round(v)));
+    refs.progressFill.style.width = val + "%";
+    refs.progressBar.setAttribute("aria-valuenow", String(val));
+  }
+
+  async function onSearch() {
+    if (state.busy) return;
+    if (!refs.consentCheckbox.checked) {
+      refs.selfieError.textContent = "يجب الموافقة على معالجة الوجه قبل البحث.";
+      refs.selfieError.hidden = false;
+      return;
+    }
+    if (!state.selfieFile) {
+      refs.selfieError.textContent = "اختر صورة سيلفي أولاً.";
+      refs.selfieError.hidden = false;
+      return;
+    }
+
+    if (!window.EvanoFace) {
+      refs.selfieError.textContent = "تعذّر تحميل محرّك التعرف على الوجه. أعد تحميل الصفحة.";
+      refs.selfieError.hidden = false;
+      return;
+    }
+
+    state.busy = true;
+    refs.selfieError.hidden = true;
+    setResultState("searching");
+    setProgress(8);
+    refs.searchingText.textContent = "جارٍ تحضير صورتك…";
+    setBusy(refs.btnSearch, true, "جارٍ البحث…");
+    state.abortController = new AbortController();
+
+    try {
+      setProgress(20);
+      refs.searchingText.textContent = "جارٍ تحميل محرّك الوجه…";
+      await window.EvanoFace.ready();
+
+      setProgress(35);
+      refs.searchingText.textContent = "جارٍ تحليل الوجه…";
+      const descriptor = await window.EvanoFace.computeOneDescriptor(state.selfieFile);
+
+      if (state.abortController.signal.aborted) {
+        throw new DOMException("aborted", "AbortError");
+      }
+
+      if (!window.EvanoFace.isValidDescriptor(descriptor)) {
+        throw new Error("لم نتمكن من الحصول على بصمة وجه صالحة.");
+      }
+
+      setProgress(62);
+      refs.searchingText.textContent = "جارٍ مطابقة الصور…";
+      const res = await fetch(API.search, {
+        method: "POST",
+        credentials: "include",
+        signal: state.abortController.signal,
+        headers: csrfHeaders(),
+        body: JSON.stringify({ embedding: descriptor, sessionId: state.sessionId })
+      });
+      setProgress(88);
+      const data = await safeJson(res);
+
+      if (res.status === 401 || res.status === 403) {
+        redirectToGallery();
+        return;
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          (data && data.message) ||
+          (res.status === 429 ? "عدد كبير من عمليات البحث. حاول لاحقاً." : "تعذّر إكمال البحث.")
+        );
+      }
+
+      if (data.sessionId) state.sessionId = data.sessionId;
+      const results = Array.isArray(data.results) ? data.results : [];
+      state.results = results;
+      setProgress(100);
+
+      if (results.length === 0) {
+        setResultState("empty");
+      } else {
+        renderResults(results);
+        setResultState("results");
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        setResultState("placeholder");
+        showToast("تم إلغاء البحث.");
+      } else if (err && err.message === "no-face-detected") {
+        refs.selfieError.textContent = "لم نجد وجهاً واضحاً في الصورة. جرّب صورة أوضح.";
+        refs.selfieError.hidden = false;
+        setResultState("placeholder");
+      } else if (err && err.message === "face-api-not-loaded") {
+        refs.errorText.textContent = "تعذّر تحميل مكتبة التعرف على الوجه. تحقق من اتصالك بالإنترنت وأعد تحميل الصفحة.";
+        setResultState("error");
+      } else {
+        refs.errorText.textContent = err.message || "حدث خطأ غير متوقع.";
+        setResultState("error");
+      }
+    } finally {
+      state.busy = false;
+      setBusy(refs.btnSearch, false);
+      state.abortController = null;
+    }
+  }
+
+  function renderResults(results) {
+    refs.gallery.innerHTML = "";
+    refs.resultsCount.textContent =
+      results.length === 1 ? "عثرنا على صورة واحدة مطابقة." :
+      "عثرنا على " + results.length + " صور مطابقة.";
+
+    setDownloadStatus("");
+
+    const frag = document.createDocumentFragment();
+    results.forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "gallery-item";
+
+      const img = document.createElement("img");
+      img.alt = item.alt || "صورة مطابقة";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.src = item.thumbnailUrl || item.url;
+
+      const actions = document.createElement("div");
+      actions.className = "gallery-actions";
+
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "btn btn-ghost btn-sm";
+      viewBtn.textContent = "عرض";
+      viewBtn.addEventListener("click", () => {
+        if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
+      });
+
+      const dlBtn = document.createElement("button");
+      dlBtn.type = "button";
+      dlBtn.className = "btn btn-ghost btn-sm";
+      dlBtn.textContent = "تحميل";
+      dlBtn.addEventListener("click", () => {
+        const url = item.downloadUrl || item.url;
+        if (!url) return;
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = item.filename || "evano-moment.jpg";
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+
+      actions.appendChild(viewBtn);
+      actions.appendChild(dlBtn);
+      li.appendChild(img);
+      li.appendChild(actions);
+      frag.appendChild(li);
+    });
+    refs.gallery.appendChild(frag);
   }
 
   function setDownloadStatus(message, type) {
-    if (!el.downloadStatus) return;
-    el.downloadStatus.classList.remove('is-error', 'is-success');
+    if (!refs.downloadStatus) return;
+    refs.downloadStatus.classList.remove("is-error", "is-success");
     if (!message) {
-      el.downloadStatus.hidden = true;
-      el.downloadStatus.textContent = '';
+      refs.downloadStatus.hidden = true;
+      refs.downloadStatus.textContent = "";
       return;
     }
-    el.downloadStatus.hidden = false;
-    el.downloadStatus.textContent = message;
-    if (type) el.downloadStatus.classList.add(`is-${type}`);
+    refs.downloadStatus.hidden = false;
+    refs.downloadStatus.textContent = message;
+    if (type) refs.downloadStatus.classList.add("is-" + type);
   }
 
-  function setDownloadLoading(loading) {
-    if (!el.btnDownloadAll) return;
-    const label = el.btnDownloadAll.querySelector('.btn-label');
-    const spinner = el.btnDownloadAll.querySelector('.spinner');
-    el.btnDownloadAll.disabled = loading;
+  function setDownloadBusy(loading) {
+    if (!refs.btnDownloadAll) return;
+    const label = refs.btnDownloadAll.querySelector(".btn-label");
+    const spinner = refs.btnDownloadAll.querySelector(".spinner");
+    refs.btnDownloadAll.disabled = loading;
     if (spinner) spinner.hidden = !loading;
-    if (label) label.textContent = loading ? 'جارٍ التحضير…' : 'تحميل كل الصور';
+    if (label) label.textContent = loading ? "جارٍ التحضير…" : "تحميل كل الصور";
   }
 
   function getImageExtension(url) {
@@ -123,383 +468,173 @@
       const match = path.match(/\.(jpe?g|png|webp|gif)(?:$|\?)/i);
       if (match) return match[1].toLowerCase();
     } catch (_) {}
-    return 'jpg';
+    return "jpg";
   }
 
   function sanitizeFileName(name) {
-    return String(name).replace(/[\\/:*?"<>|]+/g, '_');
+    return String(name).replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120) || "photo";
   }
 
   async function fetchImageAsBlob(url) {
-    const response = await fetch(url, { credentials: 'same-origin' });
-    if (!response.ok) throw new Error(`فشل تحميل الصورة (${response.status})`);
+    const response = await fetch(url, { credentials: "same-origin" });
+    if (!response.ok) throw new Error("فشل تحميل الصورة (" + response.status + ")");
     return response.blob();
   }
 
   async function downloadAllResults(results) {
-    if (isDownloading) return;
+    if (state.downloading) return;
     if (!Array.isArray(results) || results.length === 0) {
-      setDownloadStatus('لا توجد صور لتحميلها.', 'error');
+      setDownloadStatus("لا توجد صور لتحميلها.", "error");
       return;
     }
-    if (typeof JSZip === 'undefined') {
-      setDownloadStatus('تعذّر تحميل مكتبة الضغط. حاول مرة أخرى.', 'error');
+    if (typeof JSZip === "undefined") {
+      setDownloadStatus("تعذّر تحميل مكتبة الضغط. حاول مرة أخرى.", "error");
       return;
     }
 
-    isDownloading = true;
-    setDownloadLoading(true);
-    setDownloadStatus('جارٍ تجهيز الصور…');
+    state.downloading = true;
+    setDownloadBusy(true);
+    setDownloadStatus("جارٍ تجهيز الصور…");
 
     try {
       const zip = new JSZip();
-      const folder = zip.folder('evano-baptism');
+      const folder = zip.folder("evano-baptism");
       let completed = 0;
       let failed = 0;
 
       for (let i = 0; i < results.length; i += 1) {
         const item = results[i];
-        const url = typeof item === 'string' ? item : (item.url || item.src);
+        const url = item.downloadUrl || item.url;
         if (!url) { failed += 1; continue; }
 
         try {
           const blob = await fetchImageAsBlob(url);
           const ext = getImageExtension(url);
-          const baseName = (typeof item === 'object' && item.name)
-            ? sanitizeFileName(item.name)
-            : `photo-${String(i + 1).padStart(3, '0')}`;
-          folder.file(`${baseName}.${ext}`, blob);
+          const baseName = item.filename
+            ? sanitizeFileName(item.filename.replace(/\.[^.]+$/, ""))
+            : "photo-" + String(i + 1).padStart(3, "0");
+          folder.file(baseName + "." + ext, blob);
           completed += 1;
-          setDownloadStatus(`جارٍ تجهيز الصور… (${completed}/${results.length})`);
+          setDownloadStatus("جارٍ تجهيز الصور… (" + completed + "/" + results.length + ")");
         } catch (_) {
           failed += 1;
         }
       }
 
       if (completed === 0) {
-        setDownloadStatus('تعذّر تحميل أي صورة. حاول مرة أخرى.', 'error');
+        setDownloadStatus("تعذّر تحميل أي صورة. حاول مرة أخرى.", "error");
         return;
       }
 
-      setDownloadStatus('جارٍ إنشاء ملف ZIP…');
+      setDownloadStatus("جارٍ إنشاء ملف ZIP…");
       const zipBlob = await zip.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
+        type: "blob",
+        compression: "DEFLATE",
         compressionOptions: { level: 6 }
       });
 
       const now = new Date();
-      const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const stamp = now.getFullYear() + "-" +
+        String(now.getMonth() + 1).padStart(2, "0") + "-" +
+        String(now.getDate()).padStart(2, "0");
       const downloadUrl = URL.createObjectURL(zipBlob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = `evano-baptism-${stamp}.zip`;
+      link.download = "evano-baptism-" + stamp + ".zip";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000);
 
       if (failed > 0) {
-        setDownloadStatus(`تم التحميل: ${completed} صورة، فشل ${failed}.`, 'success');
+        setDownloadStatus("تم التحميل: " + completed + " صورة، فشل " + failed + ".", "success");
       } else {
-        setDownloadStatus(`تم تحميل ${completed} صورة بنجاح.`, 'success');
+        setDownloadStatus("تم تحميل " + completed + " صورة بنجاح.", "success");
       }
     } catch (_) {
-      setDownloadStatus('حدث خطأ أثناء التحميل. حاول مرة أخرى.', 'error');
+      setDownloadStatus("حدث خطأ أثناء التحميل. حاول مرة أخرى.", "error");
     } finally {
-      isDownloading = false;
-      setDownloadLoading(false);
+      state.downloading = false;
+      setDownloadBusy(false);
     }
   }
 
-  function resetResultsUI() {
+  async function onDeleteSession() {
+    if (!confirm("سيتم حذف بيانات جلسة البحث الحالية. هل تريد المتابعة؟")) return;
+    try {
+      await fetch(API.deleteSession, {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+        body: JSON.stringify({ sessionId: state.sessionId })
+      });
+    } catch {}
+    state.sessionId = null;
     state.results = [];
-    window.currentSearchResults = [];
-    if (el.gallery) el.gallery.innerHTML = '';
-    if (el.resultsCount) el.resultsCount.textContent = '';
-    if (el.downloadStatus) setDownloadStatus('');
-    if (el.btnDownloadAll) el.btnDownloadAll.disabled = false;
+    resetSelfie();
+    refs.gallery.innerHTML = "";
+    setResultState("placeholder");
+    showToast("تم حذف بيانات الجلسة.", "success");
   }
 
-  function showResults(matches) {
-    hideAllStates();
-    state.results = matches;
-    window.currentSearchResults = matches;
-    if (el.stateResults) el.stateResults.hidden = false;
-    if (el.sessionControls) el.sessionControls.hidden = false;
-    if (el.resultsCount) {
-      el.resultsCount.textContent = matches.length === 1
-        ? 'صورة واحدة مطابقة'
-        : `${matches.length} صور مطابقة`;
-    }
-    if (el.gallery) {
-      el.gallery.innerHTML = '';
-      matches.forEach((item) => {
-        const url = typeof item === 'string' ? item : (item.url || item.src);
-        if (!url) return;
-        const li = document.createElement('li');
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = 'صورة مطابقة';
-        img.loading = 'lazy';
-        li.appendChild(img);
-        el.gallery.appendChild(li);
-      });
-    }
-    if (el.btnDownloadAll) el.btnDownloadAll.disabled = false;
-    setDownloadStatus('');
-  }
+  function bind() {
+    refs.formGate.addEventListener("submit", onGateSubmit);
 
-  function showEmpty() {
-    hideAllStates();
-    if (el.stateEmpty) el.stateEmpty.hidden = false;
-    if (el.sessionControls) el.sessionControls.hidden = false;
-  }
+    refs.consentCheckbox.addEventListener("change", updateSearchButton);
 
-  function showError(message) {
-    hideAllStates();
-    if (el.stateError) el.stateError.hidden = false;
-    if (el.errorText) el.errorText.textContent = message || 'حدث خطأ غير متوقع.';
-    if (el.sessionControls) el.sessionControls.hidden = false;
-  }
-
-  function showSearching() {
-    hideAllStates();
-    if (el.stateSearching) el.stateSearching.hidden = false;
-    setProgress(0);
-    if (el.searchingText) el.searchingText.textContent = 'جارٍ البحث…';
-  }
-
-  function setSelfiePreview(file) {
-    if (!file) return;
-    state.selfieFile = file;
-    const url = URL.createObjectURL(file);
-    if (el.previewImg) {
-      el.previewImg.src = url;
-      el.previewImg.onload = () => URL.revokeObjectURL(url);
-    }
-    if (el.previewInfo) {
-      const kb = Math.round(file.size / 1024);
-      el.previewInfo.textContent = `${file.name} — ${kb} كيلوبايت`;
-    }
-    if (el.preview) el.preview.hidden = false;
-    if (el.btnSearch) el.btnSearch.disabled = false;
-    if (el.selfieError) el.selfieError.hidden = true;
-  }
-
-  function clearSelfie() {
-    state.selfieFile = null;
-    state.selfieDescriptor = null;
-    if (el.previewImg) el.previewImg.removeAttribute('src');
-    if (el.preview) el.preview.hidden = true;
-    if (el.btnSearch) el.btnSearch.disabled = true;
-    if (el.fileInput) el.fileInput.value = '';
-    if (el.cameraInput) el.cameraInput.value = '';
-  }
-
-  function handleFileSelected(file) {
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      if (el.selfieError) {
-        el.selfieError.textContent = 'الملف المختار ليس صورة.';
-        el.selfieError.hidden = false;
-      }
-      return;
-    }
-    setSelfiePreview(file);
-  }
-
-  async function runSearch() {
-    if (state.searching) return;
-    if (!state.selfieFile) {
-      if (el.selfieError) {
-        el.selfieError.textContent = 'اختر صورة أولاً.';
-        el.selfieError.hidden = false;
-      }
-      return;
-    }
-
-    resetResultsUI();
-    state.searching = true;
-    state.aborted = false;
-    showSearching();
-    setButtonLoading(el.btnSearch, true, 'جارٍ البحث…');
-    const searchLabel = el.btnSearch && el.btnSearch.querySelector('.btn-label');
-    if (searchLabel) searchLabel.textContent = 'جارٍ البحث…';
-
-    try {
-      if (!window.FaceEngine) {
-        throw new Error('محرك الوجه غير محمّل. أعد تحميل الصفحة.');
-      }
-
-      await window.FaceEngine.loadModels();
-      const descriptor = await window.FaceEngine.getDescriptorFromFile(state.selfieFile);
-      if (!descriptor) {
-        throw new Error('لم يتم اكتشاف وجه واضح في الصورة. جرّب صورة أخرى بإضاءة أفضل.');
-      }
-      state.selfieDescriptor = descriptor;
-
-      setProgress(25);
-      if (el.searchingText) el.searchingText.textContent = 'جارٍ البحث في الألبوم…';
-
-      const response = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ descriptor: Array.from(descriptor) })
-      });
-
-      if (state.aborted) return;
-
-      if (response.status === 401 || response.status === 403) {
-        redirectToGallery();
-        return;
-      }
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        throw new Error(errText || 'تعذّر إكمال البحث.');
-      }
-
-      const data = await response.json();
-      setProgress(100);
-      const matches = Array.isArray(data.matches) ? data.matches : [];
-      if (matches.length === 0) {
-        showEmpty();
-      } else {
-        showResults(matches);
-      }
-    } catch (err) {
-      if (state.aborted) return;
-      showError(err && err.message ? err.message : 'تعذّر إكمال البحث.');
-    } finally {
-      state.searching = false;
-      if (searchLabel) searchLabel.textContent = 'ابحث عن صوري';
-      setButtonLoading(el.btnSearch, false, 'ابحث عن صوري');
-    }
-  }
-
-  async function verifyGate(code) {
-    if (!code || code.length < 4) {
-      if (el.gateError) {
-        el.gateError.textContent = 'الرمز قصير جداً.';
-        el.gateError.hidden = false;
-      }
-      return false;
-    }
-    setButtonLoading(el.btnGate, true, 'متابعة');
-    if (el.gateError) el.gateError.hidden = true;
-    try {
-      const response = await fetch('/api/gallery/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ code })
-      });
-      if (!response.ok) {
-        throw new Error('الرمز غير صحيح.');
-      }
-      return true;
-    } catch (err) {
-      if (el.gateError) {
-        el.gateError.textContent = err && err.message ? err.message : 'الرمز غير صحيح.';
-        el.gateError.hidden = false;
-      }
-      return false;
-    } finally {
-      setButtonLoading(el.btnGate, false, 'متابعة');
-    }
-  }
-
-  async function bootstrap() {
-    if (el.gate) el.gate.hidden = true;
-    if (el.search) el.search.hidden = true;
-
-    try {
-      const response = await fetch('/api/gallery/session', {
-        credentials: 'same-origin',
-        cache: 'no-store'
-      });
-      if (response.ok) {
-        state.gateChecked = true;
-        if (el.search) el.search.hidden = false;
-        return;
-      }
-    } catch (_) {}
-
-    redirectToGallery();
-  }
-
-  function bindEvents() {
-    if (el.consentCheckbox) {
-      el.consentCheckbox.addEventListener('change', () => {
-        if (el.selfieFieldset) el.selfieFieldset.disabled = !el.consentCheckbox.checked;
-      });
-    }
-    if (el.btnCamera) el.btnCamera.addEventListener('click', () => el.cameraInput && el.cameraInput.click());
-    if (el.btnUpload) el.btnUpload.addEventListener('click', () => el.fileInput && el.fileInput.click());
-    if (el.cameraInput) {
-      el.cameraInput.addEventListener('change', (event) => {
-        const file = event.target.files && event.target.files[0];
-        handleFileSelected(file);
-      });
-    }
-    if (el.fileInput) {
-      el.fileInput.addEventListener('change', (event) => {
-        const file = event.target.files && event.target.files[0];
-        handleFileSelected(file);
-      });
-    }
-    if (el.btnReplace) el.btnReplace.addEventListener('click', () => el.fileInput && el.fileInput.click());
-    if (el.btnClear) el.btnClear.addEventListener('click', clearSelfie);
-    if (el.btnSearch) el.btnSearch.addEventListener('click', runSearch);
-
-    if (el.btnCancelSearch) {
-      el.btnCancelSearch.addEventListener('click', () => {
-        state.aborted = true;
-        state.searching = false;
-        hideAllStates();
-        if (el.placeholder) el.placeholder.hidden = false;
-        const searchLabel = el.btnSearch && el.btnSearch.querySelector('.btn-label');
-        if (searchLabel) searchLabel.textContent = 'ابحث عن صوري';
-        setButtonLoading(el.btnSearch, false, 'ابحث عن صوري');
-      });
-    }
-
-    [el.btnRetry, el.btnErrorRetry].forEach((btn) => {
-      if (!btn) return;
-      btn.addEventListener('click', () => {
-        hideAllStates();
-        if (el.placeholder) el.placeholder.hidden = false;
-      });
+    refs.btnCamera.addEventListener("click", () => refs.cameraInput.click());
+    refs.btnUpload.addEventListener("click", () => refs.fileInput.click());
+    refs.cameraInput.addEventListener("change", (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) onSelfieSelected(f);
+    });
+    refs.fileInput.addEventListener("change", (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) onSelfieSelected(f);
     });
 
-    if (el.btnDeleteSession) {
-      el.btnDeleteSession.addEventListener('click', async () => {
-        try {
-          await fetch('/api/search/session', { method: 'DELETE', credentials: 'same-origin' });
-          showToast('تم حذف بيانات جلسة البحث.', 'success');
-          resetResultsUI();
-          hideAllStates();
-          if (el.placeholder) el.placeholder.hidden = false;
-          if (el.sessionControls) el.sessionControls.hidden = true;
-        } catch (_) {
-          showToast('تعذّر حذف بيانات الجلسة.', 'error');
-        }
-      });
-    }
+    refs.btnReplace.addEventListener("click", () => refs.fileInput.click());
+    refs.btnClear.addEventListener("click", resetSelfie);
 
-    if (el.btnDownloadAll) {
-      el.btnDownloadAll.addEventListener('click', () => {
+    refs.btnSearch.addEventListener("click", onSearch);
+    refs.btnCancelSearch.addEventListener("click", () => {
+      if (state.abortController) state.abortController.abort();
+    });
+
+    refs.btnRetry.addEventListener("click", () => {
+      resetSelfie();
+      setResultState("placeholder");
+    });
+    refs.btnErrorRetry.addEventListener("click", onSearch);
+
+    refs.btnDeleteSession.addEventListener("click", onDeleteSession);
+
+    if (refs.btnDownloadAll) {
+      refs.btnDownloadAll.addEventListener("click", () => {
         downloadAllResults(state.results);
       });
     }
+
+    window.addEventListener("beforeunload", () => {
+      if (state.selfiePreviewUrl) URL.revokeObjectURL(state.selfiePreviewUrl);
+    });
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    bindEvents();
-    bootstrap();
-  });
+  function init() {
+    if (!window.EvanoFace) {
+      refs.btnSearch.disabled = true;
+      refs.selfieError.textContent = "تعذّر تحميل محرّك التعرف على الوجه. أعد تحميل الصفحة.";
+      refs.selfieError.hidden = false;
+    }
+    setResultState("placeholder");
+    updateSearchButton();
+    bind();
+    checkSession();
+  }
 
-  window.currentSearchResults = [];
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();
