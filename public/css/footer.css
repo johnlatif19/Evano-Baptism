@@ -1,0 +1,15 @@
+.site-footer {
+  margin-top: 40px; padding: 34px 0;
+  border-top: 1px solid var(--line); background: var(--surface);
+}
+.footer-inner { display: grid; gap: 10px; justify-items: center; text-align: center; }
+.footer-brand {
+  font-family: var(--font-display); font-size: 1.15rem;
+  margin: 0; color: var(--navy);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.footer-brand span { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+.footer-note { font-size: .85rem; color: var(--ink-muted); margin: 0; }
+.footer-nav { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+.footer-nav a { font-size: .85rem; color: var(--ink-muted); }
+.footer-nav a:hover { color: var(--gold-deep); }
