@@ -13,6 +13,7 @@
   const MIN_DIM = 200;
   const MAX_DIM = 6000;
   const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const DOWNLOAD_DELAY_MS = 700;
 
   const state = {
     authed: false,
@@ -420,15 +421,7 @@
       dlBtn.className = "btn btn-ghost btn-sm";
       dlBtn.textContent = "تحميل";
       dlBtn.addEventListener("click", () => {
-        const url = item.downloadUrl || item.url;
-        if (!url) return;
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = item.filename || "evano-moment.jpg";
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        downloadSingle(item);
       });
 
       actions.appendChild(viewBtn);
@@ -438,6 +431,75 @@
       frag.appendChild(li);
     });
     refs.gallery.appendChild(frag);
+  }
+
+  function getFileExtension(url, fallback) {
+    try {
+      const path = new URL(url, window.location.origin).pathname;
+      const match = path.match(/\.(jpe?g|png|webp|gif)(?:$|\?)/i);
+      if (match) return match[1].toLowerCase();
+    } catch (_) {}
+    return fallback || "jpg";
+  }
+
+  function sanitizeFileName(name) {
+    return String(name)
+      .replace(/[\\/:*?"<>|]+/g, "_")
+      .replace(/\s+/g, "_")
+      .slice(0, 120) || "photo";
+  }
+
+  function buildFileName(item, index) {
+    const url = item.downloadUrl || item.url || "";
+    const ext = getFileExtension(url, "jpg");
+    if (item.filename) {
+      const base = sanitizeFileName(item.filename.replace(/\.[^.]+$/, ""));
+      return base + "." + ext;
+    }
+    return "evano-" + String(index + 1).padStart(3, "0") + "." + ext;
+  }
+
+  async function fetchImageAsBlob(url) {
+    const response = await fetch(url, { credentials: "same-origin" });
+    if (!response.ok) throw new Error("فشل تحميل الصورة (" + response.status + ")");
+    return response.blob();
+  }
+
+  function triggerBlobDownload(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  async function downloadSingle(item) {
+    const url = item.downloadUrl || item.url;
+    if (!url) {
+      showToast("تعذّر تحديد رابط الصورة.", "error");
+      return;
+    }
+    try {
+      const blob = await fetchImageAsBlob(url);
+      triggerBlobDownload(blob, buildFileName(item, 0));
+    } catch (_) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = buildFileName(item, 0);
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function setDownloadStatus(message, type) {
@@ -459,26 +521,7 @@
     const spinner = refs.btnDownloadAll.querySelector(".spinner");
     refs.btnDownloadAll.disabled = loading;
     if (spinner) spinner.hidden = !loading;
-    if (label) label.textContent = loading ? "جارٍ التحضير…" : "تحميل كل الصور";
-  }
-
-  function getImageExtension(url) {
-    try {
-      const path = new URL(url, window.location.origin).pathname;
-      const match = path.match(/\.(jpe?g|png|webp|gif)(?:$|\?)/i);
-      if (match) return match[1].toLowerCase();
-    } catch (_) {}
-    return "jpg";
-  }
-
-  function sanitizeFileName(name) {
-    return String(name).replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120) || "photo";
-  }
-
-  async function fetchImageAsBlob(url) {
-    const response = await fetch(url, { credentials: "same-origin" });
-    if (!response.ok) throw new Error("فشل تحميل الصورة (" + response.status + ")");
-    return response.blob();
+    if (label) label.textContent = loading ? "جارٍ التحميل…" : "تحميل كل الصور";
   }
 
   async function downloadAllResults(results) {
@@ -487,76 +530,44 @@
       setDownloadStatus("لا توجد صور لتحميلها.", "error");
       return;
     }
-    if (typeof JSZip === "undefined") {
-      setDownloadStatus("تعذّر تحميل مكتبة الضغط. حاول مرة أخرى.", "error");
-      return;
-    }
 
     state.downloading = true;
     setDownloadBusy(true);
     setDownloadStatus("جارٍ تجهيز الصور…");
 
-    try {
-      const zip = new JSZip();
-      const folder = zip.folder("evano-baptism");
-      let completed = 0;
-      let failed = 0;
+    let completed = 0;
+    let failed = 0;
 
-      for (let i = 0; i < results.length; i += 1) {
-        const item = results[i];
-        const url = item.downloadUrl || item.url;
-        if (!url) { failed += 1; continue; }
-
-        try {
-          const blob = await fetchImageAsBlob(url);
-          const ext = getImageExtension(url);
-          const baseName = item.filename
-            ? sanitizeFileName(item.filename.replace(/\.[^.]+$/, ""))
-            : "photo-" + String(i + 1).padStart(3, "0");
-          folder.file(baseName + "." + ext, blob);
-          completed += 1;
-          setDownloadStatus("جارٍ تجهيز الصور… (" + completed + "/" + results.length + ")");
-        } catch (_) {
-          failed += 1;
-        }
+    for (let i = 0; i < results.length; i += 1) {
+      const item = results[i];
+      const url = item.downloadUrl || item.url;
+      if (!url) {
+        failed += 1;
+        continue;
       }
 
-      if (completed === 0) {
-        setDownloadStatus("تعذّر تحميل أي صورة. حاول مرة أخرى.", "error");
-        return;
+      try {
+        const blob = await fetchImageAsBlob(url);
+        const fileName = buildFileName(item, i);
+        triggerBlobDownload(blob, fileName);
+        completed += 1;
+        setDownloadStatus("جارٍ التحميل… (" + completed + "/" + results.length + ")");
+        await sleep(DOWNLOAD_DELAY_MS);
+      } catch (_) {
+        failed += 1;
       }
-
-      setDownloadStatus("جارٍ إنشاء ملف ZIP…");
-      const zipBlob = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 }
-      });
-
-      const now = new Date();
-      const stamp = now.getFullYear() + "-" +
-        String(now.getMonth() + 1).padStart(2, "0") + "-" +
-        String(now.getDate()).padStart(2, "0");
-      const downloadUrl = URL.createObjectURL(zipBlob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = "evano-baptism-" + stamp + ".zip";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000);
-
-      if (failed > 0) {
-        setDownloadStatus("تم التحميل: " + completed + " صورة، فشل " + failed + ".", "success");
-      } else {
-        setDownloadStatus("تم تحميل " + completed + " صورة بنجاح.", "success");
-      }
-    } catch (_) {
-      setDownloadStatus("حدث خطأ أثناء التحميل. حاول مرة أخرى.", "error");
-    } finally {
-      state.downloading = false;
-      setDownloadBusy(false);
     }
+
+    if (completed === 0) {
+      setDownloadStatus("تعذّر تحميل أي صورة. حاول مرة أخرى.", "error");
+    } else if (failed > 0) {
+      setDownloadStatus("تم تحميل " + completed + " صورة، فشل " + failed + ".", "success");
+    } else {
+      setDownloadStatus("تم تحميل " + completed + " صورة بنجاح.", "success");
+    }
+
+    state.downloading = false;
+    setDownloadBusy(false);
   }
 
   async function onDeleteSession() {
