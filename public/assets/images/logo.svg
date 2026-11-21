@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 400" role="img" aria-labelledby="logoTitle">
+  <title id="logoTitle">Evano Baptism</title>
+  <defs>
+    <linearGradient id="goldFull" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9b968"/>
+      <stop offset="0.5" stop-color="#c9a04a"/>
+      <stop offset="1" stop-color="#a67c2e"/>
+    </linearGradient>
+    <linearGradient id="navyFull" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3563"/>
+      <stop offset="1" stop-color="#0f1e3d"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="320" height="400" rx="18" fill="#faf7f2"/>
+  <path d="M40 190 Q160 40 280 190" fill="none" stroke="url(#goldFull)" stroke-width="2.5" opacity="0.85"/>
+  <g fill="url(#navyFull)">
+    <rect x="70" y="150" width="180" height="100" rx="16"/>
+    <rect x="100" y="135" width="60" height="25" rx="8"/>
+    <circle cx="230" cy="158" r="7" fill="#d9b968"/>
+  </g>
+  <circle cx="160" cy="205" r="52" fill="#faf7f2" stroke="url(#goldFull)" stroke-width="2.5"/>
+  <circle cx="160" cy="205" r="38" fill="none" stroke="url(#goldFull)" stroke-width="1.2" opacity="0.6"/>
+  <g fill="url(#goldFull)">
+    <rect x="155" y="178" width="10" height="54" rx="1.5"/>
+    <rect x="139" y="192" width="42" height="10" rx="1.5"/>
+  </g>
+  <g transform="translate(232 140)">
+    <path d="M0 20 Q12 6 28 8 Q36 2 48 6 Q42 14 32 16 Q26 28 8 30 Q6 24 0 20Z"
+          fill="#faf7f2" stroke="url(#navyFull)" stroke-width="2.2" stroke-linejoin="round"/>
+    <circle cx="44" cy="8" r="1.6" fill="url(#navyFull)"/>
+    <path d="M44 9 Q52 12 58 10" fill="none" stroke="url(#goldFull)" stroke-width="1.8"/>
+  </g>
+  <text x="160" y="310" text-anchor="middle"
+        font-family="Cormorant Garamond, serif"
+        font-size="58" font-weight="700" fill="url(#navyFull)"
+        letter-spacing="-1">Evano</text>
+  <line x1="70" y1="330" x2="110" y2="330" stroke="url(#goldFull)" stroke-width="1.8"/>
+  <line x1="210" y1="330" x2="250" y2="330" stroke="url(#goldFull)" stroke-width="1.8"/>
+  <text x="160" y="340" text-anchor="middle"
+        font-family="Cormorant Garamond, serif"
+        font-size="34" font-weight="500" fill="url(#navyFull)"
+        letter-spacing="2">Baptism</text>
+  <g transform="translate(160 380)">
+    <ellipse cx="0" cy="0" rx="16" ry="4" fill="url(#goldFull)"/>
+    <path d="M-10 -2 Q-10 -12 0 -12 Q10 -12 10 -2 Z" fill="url(#goldFull)" opacity="0.85"/>
+    <path d="M0 -14 Q2 -20 0 -24 Q-2 -20 0 -14Z" fill="#d9b968"/>
+  </g>
+</svg>
