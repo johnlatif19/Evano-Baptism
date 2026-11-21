@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-labelledby="logoMarkTitle">
+  <title id="logoMarkTitle">Evano Baptism</title>
+  <defs>
+    <linearGradient id="goldMark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9b968"/>
+      <stop offset="1" stop-color="#a67c2e"/>
+    </linearGradient>
+    <linearGradient id="navyMark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3563"/>
+      <stop offset="1" stop-color="#0f1e3d"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="14" width="76" height="52" rx="12" fill="url(#navyMark)"/>
+  <rect x="22" y="8" width="22" height="10" rx="4" fill="url(#navyMark)"/>
+  <circle cx="66" cy="20" r="3" fill="#d9b968"/>
+  <circle cx="40" cy="40" r="18" fill="#faf7f2" stroke="url(#goldMark)" stroke-width="1.8"/>
+  <rect x="37.5" y="28" width="5" height="24" rx="1" fill="url(#goldMark)"/>
+  <rect x="30" y="35" width="20" height="5" rx="1" fill="url(#goldMark)"/>
+</svg>
