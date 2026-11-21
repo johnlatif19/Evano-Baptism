@@ -54,6 +54,10 @@
   let toastTimer = null;
   let isDownloading = false;
 
+  function redirectToGallery() {
+    window.location.replace('/gallery');
+  }
+
   function showToast(message, type) {
     if (!el.toast) return;
     el.toast.textContent = message;
@@ -65,13 +69,16 @@
     toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
   }
 
-  function setButtonLoading(button, loading, loadingText) {
+  function setButtonLoading(button, loading, idleText) {
     if (!button) return;
     const label = button.querySelector('.btn-label');
     const spinner = button.querySelector('.spinner');
     button.disabled = loading;
     if (spinner) spinner.hidden = !loading;
-    if (label && loadingText) label.textContent = loading ? loadingText : label.dataset.idleText || label.textContent;
+    if (label) {
+      if (!label.dataset.idleText) label.dataset.idleText = idleText || label.textContent;
+      label.textContent = loading ? 'جارٍ التحقق…' : label.dataset.idleText;
+    }
   }
 
   function hideAllStates() {
@@ -131,12 +138,10 @@
 
   async function downloadAllResults(results) {
     if (isDownloading) return;
-
     if (!Array.isArray(results) || results.length === 0) {
       setDownloadStatus('لا توجد صور لتحميلها.', 'error');
       return;
     }
-
     if (typeof JSZip === 'undefined') {
       setDownloadStatus('تعذّر تحميل مكتبة الضغط. حاول مرة أخرى.', 'error');
       return;
@@ -163,8 +168,7 @@
           const baseName = (typeof item === 'object' && item.name)
             ? sanitizeFileName(item.name)
             : `photo-${String(i + 1).padStart(3, '0')}`;
-          const fileName = `${baseName}.${ext}`;
-          folder.file(fileName, blob);
+          folder.file(`${baseName}.${ext}`, blob);
           completed += 1;
           setDownloadStatus(`جارٍ تجهيز الصور… (${completed}/${results.length})`);
         } catch (_) {
@@ -221,16 +225,13 @@
     hideAllStates();
     state.results = matches;
     window.currentSearchResults = matches;
-
     if (el.stateResults) el.stateResults.hidden = false;
     if (el.sessionControls) el.sessionControls.hidden = false;
-
     if (el.resultsCount) {
       el.resultsCount.textContent = matches.length === 1
         ? 'صورة واحدة مطابقة'
         : `${matches.length} صور مطابقة`;
     }
-
     if (el.gallery) {
       el.gallery.innerHTML = '';
       matches.forEach((item) => {
@@ -245,7 +246,6 @@
         el.gallery.appendChild(li);
       });
     }
-
     if (el.btnDownloadAll) el.btnDownloadAll.disabled = false;
     setDownloadStatus('');
   }
@@ -273,7 +273,6 @@
   function setSelfiePreview(file) {
     if (!file) return;
     state.selfieFile = file;
-
     const url = URL.createObjectURL(file);
     if (el.previewImg) {
       el.previewImg.src = url;
@@ -325,19 +324,22 @@
     state.aborted = false;
     showSearching();
     setButtonLoading(el.btnSearch, true, 'جارٍ البحث…');
+    const searchLabel = el.btnSearch && el.btnSearch.querySelector('.btn-label');
+    if (searchLabel) searchLabel.textContent = 'جارٍ البحث…';
 
     try {
-      if (!window.FaceEngine || typeof window.FaceEngine.getDescriptorFromFile !== 'function') {
-        throw new Error('محرك الوجه غير جاهز.');
+      if (!window.FaceEngine) {
+        throw new Error('محرك الوجه غير محمّل. أعد تحميل الصفحة.');
       }
 
+      await window.FaceEngine.loadModels();
       const descriptor = await window.FaceEngine.getDescriptorFromFile(state.selfieFile);
       if (!descriptor) {
-        throw new Error('لم يتم اكتشاف وجه واضح في الصورة. جرّب صورة أخرى.');
+        throw new Error('لم يتم اكتشاف وجه واضح في الصورة. جرّب صورة أخرى بإضاءة أفضل.');
       }
       state.selfieDescriptor = descriptor;
 
-      setProgress(20);
+      setProgress(25);
       if (el.searchingText) el.searchingText.textContent = 'جارٍ البحث في الألبوم…';
 
       const response = await fetch('/api/search', {
@@ -348,6 +350,11 @@
       });
 
       if (state.aborted) return;
+
+      if (response.status === 401 || response.status === 403) {
+        redirectToGallery();
+        return;
+      }
 
       if (!response.ok) {
         const errText = await response.text().catch(() => '');
@@ -367,6 +374,7 @@
       showError(err && err.message ? err.message : 'تعذّر إكمال البحث.');
     } finally {
       state.searching = false;
+      if (searchLabel) searchLabel.textContent = 'ابحث عن صوري';
       setButtonLoading(el.btnSearch, false, 'ابحث عن صوري');
     }
   }
@@ -379,10 +387,8 @@
       }
       return false;
     }
-
-    setButtonLoading(el.btnGate, true, 'جارٍ التحقق…');
+    setButtonLoading(el.btnGate, true, 'متابعة');
     if (el.gateError) el.gateError.hidden = true;
-
     try {
       const response = await fetch('/api/gallery/auth', {
         method: 'POST',
@@ -390,11 +396,9 @@
         credentials: 'same-origin',
         body: JSON.stringify({ code })
       });
-
       if (!response.ok) {
         throw new Error('الرمز غير صحيح.');
       }
-
       return true;
     } catch (err) {
       if (el.gateError) {
@@ -412,46 +416,28 @@
     if (el.search) el.search.hidden = true;
 
     try {
-      const response = await fetch('/api/gallery/session', { credentials: 'same-origin' });
+      const response = await fetch('/api/gallery/session', {
+        credentials: 'same-origin',
+        cache: 'no-store'
+      });
       if (response.ok) {
         state.gateChecked = true;
         if (el.search) el.search.hidden = false;
-        if (el.sessionControls) el.sessionControls.hidden = false;
-      } else {
-        if (el.gate) el.gate.hidden = false;
+        return;
       }
-    } catch (_) {
-      if (el.gate) el.gate.hidden = false;
-    }
+    } catch (_) {}
+
+    redirectToGallery();
   }
 
   function bindEvents() {
-    if (el.formGate) {
-      el.formGate.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const code = el.galleryCode ? el.galleryCode.value.trim() : '';
-        const ok = await verifyGate(code);
-        if (ok) {
-          state.gateChecked = true;
-          if (el.gate) el.gate.hidden = true;
-          if (el.search) el.search.hidden = false;
-          if (el.sessionControls) el.sessionControls.hidden = false;
-        }
-      });
-    }
-
     if (el.consentCheckbox) {
       el.consentCheckbox.addEventListener('change', () => {
         if (el.selfieFieldset) el.selfieFieldset.disabled = !el.consentCheckbox.checked;
       });
     }
-
-    if (el.btnCamera) {
-      el.btnCamera.addEventListener('click', () => el.cameraInput && el.cameraInput.click());
-    }
-    if (el.btnUpload) {
-      el.btnUpload.addEventListener('click', () => el.fileInput && el.fileInput.click());
-    }
+    if (el.btnCamera) el.btnCamera.addEventListener('click', () => el.cameraInput && el.cameraInput.click());
+    if (el.btnUpload) el.btnUpload.addEventListener('click', () => el.fileInput && el.fileInput.click());
     if (el.cameraInput) {
       el.cameraInput.addEventListener('change', (event) => {
         const file = event.target.files && event.target.files[0];
@@ -464,17 +450,9 @@
         handleFileSelected(file);
       });
     }
-
-    if (el.btnReplace) {
-      el.btnReplace.addEventListener('click', () => el.fileInput && el.fileInput.click());
-    }
-    if (el.btnClear) {
-      el.btnClear.addEventListener('click', clearSelfie);
-    }
-
-    if (el.btnSearch) {
-      el.btnSearch.addEventListener('click', runSearch);
-    }
+    if (el.btnReplace) el.btnReplace.addEventListener('click', () => el.fileInput && el.fileInput.click());
+    if (el.btnClear) el.btnClear.addEventListener('click', clearSelfie);
+    if (el.btnSearch) el.btnSearch.addEventListener('click', runSearch);
 
     if (el.btnCancelSearch) {
       el.btnCancelSearch.addEventListener('click', () => {
@@ -482,19 +460,19 @@
         state.searching = false;
         hideAllStates();
         if (el.placeholder) el.placeholder.hidden = false;
+        const searchLabel = el.btnSearch && el.btnSearch.querySelector('.btn-label');
+        if (searchLabel) searchLabel.textContent = 'ابحث عن صوري';
         setButtonLoading(el.btnSearch, false, 'ابحث عن صوري');
       });
     }
 
-    if (el.btnRetry || el.btnErrorRetry) {
-      [el.btnRetry, el.btnErrorRetry].forEach((btn) => {
-        if (!btn) return;
-        btn.addEventListener('click', () => {
-          hideAllStates();
-          if (el.placeholder) el.placeholder.hidden = false;
-        });
+    [el.btnRetry, el.btnErrorRetry].forEach((btn) => {
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        hideAllStates();
+        if (el.placeholder) el.placeholder.hidden = false;
       });
-    }
+    });
 
     if (el.btnDeleteSession) {
       el.btnDeleteSession.addEventListener('click', async () => {
