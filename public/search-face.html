@@ -145,6 +145,14 @@
           <div id="state-results" class="state" hidden>
             <p class="results-count" id="resultsCount"></p>
             <ul class="gallery" id="gallery"></ul>
+
+            <div class="results-actions">
+              <button type="button" class="btn btn-primary" id="btn-download-all">
+                <span class="btn-label">تحميل كل الصور</span>
+                <span class="spinner" hidden></span>
+              </button>
+              <p class="download-status" id="downloadStatus" hidden></p>
+            </div>
           </div>
 
           <div id="state-empty" class="state state-empty" hidden>
@@ -184,6 +192,7 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
   <script src="/js/face-engine.js" defer></script>
   <script src="/js/search-face.js" defer></script>
 </body>
